@@ -1,0 +1,53 @@
+#!/usr/bin/env jip
+#
+# Run Bisulfite Mapping in a given lane through gemBS
+#
+# Usage:
+#  bsMapping.jip -x <index> -f <fli> -c <config> -i <input> -d <output_dir> -t <tmp> -h <threads> --underConvSeq <underConvSeq> --overConvSeq <overConvSeq> --pe
+#
+# Inputs:
+#    -x, --index <index>            Gem Index of the reference file
+#    -c, --config <config>          JSON Configuration file
+#    -i, --input <input>            Input sequence files (fastq or Bam)
+#
+# Options:
+#    -f, --fli <fli>                Flowcell_Lane_Index format name
+#    -d, --output_dir <output_dir>  Output directory
+#    -t, --tmp <tmp>                TMP directory
+#    -h, --threads                  Number of threads [default: 8]
+#    --underConvSeq <underConvSeq>  Name of Lambda Sequence used to control unmethylated cytosines which fails to be deaminated and thus appears to be Methylated.
+#    --overConvSeq <overConvSeq>    Name of Lambda Sequence used to control methylated cytosines which are deaminated and thus appears to be Unmethylated.
+#    --pe                           Is or not paired end sequencing [default: false]
+#
+
+#%begin init
+add_output('output', '${output_dir}/${fli}.bam',hidden=False)
+add_output('output_json', '${output_dir}/${fli}.json',hidden=False,sticky=True)
+#%end
+
+paired=`echo ${pe|arg("yes")|else("no")}`
+
+unConvSeq=`echo ${underConvSeq}`
+ovConvSeq=`echo ${overConvSeq}`
+
+conversionSequence=""
+
+if [ "$unConvSeq" != "None" ];
+then
+    conversionSequence=${conversionSequence}" -n "${underConvSeq}
+fi 
+
+if [ "$ovConvSeq" != "None" ];
+then
+  conversionSequence=${conversionSequence}" -v "${overConvSeq}
+fi
+
+
+if [ "$paired" == "yes" ];
+then 
+    gemBS mapping -I ${index} -f ${fli} -j ${config} -i ${input} -o ${output_dir} -d ${tmp} -t ${threads} -p ${conversionSequence}  
+else
+    gemBS mapping -I ${index} -f ${fli} -j ${config} -i ${input} -o ${output_dir} -d ${tmp} -t ${threads} ${conversionSequence}
+fi
+
+

@@ -1,0 +1,30 @@
+#!/usr/bin/env jip
+#
+# Filter bcf methylation calling files
+#
+# Usage:
+#  filter_calls.jip -m <meth_bcf> -f <filter_path> -l {chromosome_length} -n ${sample} -o <output> -s <output_stats> -e <output_meth> -b <output_call_bw> -w <output_cov_bw> 
+#                   -q <quality> -i <informative_reads>
+# 
+# Inputs:
+#    -m, --meth_bcf <meth_bcf>                   Raw methylation calls to be filtered
+#    -f, --filter_path <filter_path>             Filtering path
+#    -l, --chromosome_length <chromosome_length> Chromosome Length
+#
+# Options:
+#    -n, --sample <sample>                       Sample Name
+#    -q, --quality <quality>                     Quality filtering criteria for the CpGs
+#    -i, --informative_reads <informative_reads> Total number of informative reads to filter CpGs.
+#
+# Outputs:
+#    -o, --output <output>                       Output cpg file 
+#    -s, --output_stats <output_stats>           Ouput CpG Stats File
+#    -e, --output_meth  <output_meth>            Output methylation Stats for CGs
+#    -b, --output_call_bw <output_call_bw>       Output Methylation Bigwig
+#    -w, --output_cov_bw <output_cov_bw>         Output Dinculeotides coverage Bigwig
+
+
+gemBS methylation-filtering  -b ${meth_bcf} -o ${filter_path}
+
+gemBS cpg-bigwig -c ${output} -l ${chromosome_length} -n ${sample} -q ${quality} -i ${informative_reads} -o ${filter_path} 
+

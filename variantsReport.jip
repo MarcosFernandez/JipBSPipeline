@@ -1,0 +1,22 @@
+#!/usr/bin/env jip
+#
+# Run Variants Report for all chromosome and samples
+#
+# Usage:
+#  variantsReport.jip -i <input>... -s <snpcalls_dir> -j <json> -n <project_name> -d <output_dir> -c <chromList>...
+#
+# Inputs:
+#    -i, --input <input>...              List input json files
+#    -s, --snpcalls_dir                  SNP Calling Directory
+#
+# Options:
+#    -j, --json <json>                   JSON configuration file
+#    -n, --project_name <project_name>   Project Name
+#    -d, --output_dir                    Output directory
+#    -c, --chromList <chromList>...      Chromosome List
+#    
+
+gemBS variants-report -j ${json} -i ${snpcalls_dir} -n ${project_name} -o ${output_dir} -l ${chromList}
+                             
+buildPdfFile.py -s ${output_dir}/SPHINX/ 
+

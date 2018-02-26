@@ -1,0 +1,22 @@
+#!/usr/bin/env jip
+#
+# Run Bisulfite Mapping Report for all lanes and samples
+#
+# Usage:
+#  bsMappingReport.jip -i <input>... -m <mapping_dir> -j <json> -n <project_name> -d <output_dir> 
+#
+# Inputs:
+#    -i, --input <input>...              List input json files
+#    -m, --mapping_dir                   Mapping Directory
+#
+# Options:
+#    -j, --json <json>                   JSON configuration file
+#    -n, --project_name <project_name>   Project Name
+#    -d, --output_dir                    Output directory
+#
+#    
+
+gemBS bsMap-report -j ${json} -i ${mapping_dir} -n ${project_name} -o ${output_dir}
+
+buildPdfFile.py -s ${output_dir}/SPHINX/ 
+

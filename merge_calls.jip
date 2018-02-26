@@ -1,0 +1,20 @@
+#!/usr/bin/env jip
+#
+# Merge Calls from different sources (Usually chromosomes)
+#
+# Usage:
+#  merge_calls.jip -s <sample> -c <chromBcfs>...  -d <output_dir> -o <output>
+#
+# Inputs:
+#    -c, --chromBcfs <chromBcfs>... List of bcf files to be merged
+#    -d, --output_dir <output_dir>  Output directory
+#
+# Options:
+#    -s, --sample <sample>          Sample name for the merged result
+#
+# Outputs:
+#    -o, --output <output>          Output merged bcf file 
+
+gemBS bscall-concatenate -s ${sample}  -l ${chromBcfs} -o ${output_dir}
+
+

@@ -1,0 +1,15 @@
+#!/usr/bin/env jip
+#
+# Remove bisulfite mapped files
+#
+# Usage:
+#  rmBsMappings -i <input> -d <input_dir>
+# 
+# Inputs:
+#    -i, --input <input>    Input file, used to wait for merging processed be finished
+#
+# Options:
+#    -d, --input_dir <input_dir>    Input directory
+
+rm -f ${input_dir}/*.bam
+

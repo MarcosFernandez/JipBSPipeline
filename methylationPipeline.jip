@@ -1,0 +1,596 @@
+#!/usr/bin/env jip
+#
+# Run Bisulfite Mapping and Methylation calling
+#
+# usage:
+#     methylationPipeline.jip -r <ref> -i <index> [-b <dbSNP>] -m <chrom_len> -j <jsonConfig> -s <seqDir> -d <dirOut> -n <name> 
+#                             [-e <typeSpecies>] [-t <tmpDir>] [-c <threads>] [--pe] [--fi] 
+#                             [--keepUnmatched] [--keepDuplicates] [-l <chromList>...] [--rm] [--rc]
+#                             [--quality <quality>] [--informative_reads <informative_reads>]                                                  
+#                             [--timeMap <timeMap>] [--timeMapMerge <timeMapMerge>] [--timeCallChr <timeCallChr>] [--timeMergeCall <timeMergeCall>] [--timeFilterCall <timeFilterCall>]
+#                             [--jsonTime <jsonTime>] [--from <from_step_id>] [--underConvSeq <underConvSeq>] [--overConvSeq <overConvSeq>]
+# Inputs:
+#   -r,--ref <ref>                   Reference fasta file.
+#   -i,--index <index>               Gem bisulfite index.
+#   -m,--chrom_len <chrom_len>       File Chromosome Length
+#   -j,--jsonConfig <jsonConfig>     Json configuration file.
+#   -s,--seqDir <seqDir>             Directory where is located the input data. Fastq or bam files.
+#   -d,--dirOut <dirOut>             Directory output to store pipeline results. 
+#
+# Options:
+#   -b,--dbSNP <dbSNP>                dbSNP index files.
+#   -n, --name <name>                 Name of the project.
+#   -e, --typeSpecies <typeSpecies>   Type Species name. By Default: HomoSapiens. [default: HomoSapiens]
+#   -t, --tmpDir <tmpDir>             Temporary directory. By Default: $TMPDIR. [default: $TMPDIR] 
+#   -c, --threads <threads>           Number of threads to be used. [default: 8] 
+#   --pe                              Paired End sequencing. [default: False]
+#   --fi                              Perform methylation filtering. [default: False]
+#   -l, --chromList <chromList>...    Chromosome List. By default: chr1 chr2 chr3 chr4 chr5 chr6 chr7 chr8 chr9 chr10 chr11 chr12 chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22 chrX chrY
+#   --rm                              Remove bisulfite mapping. [default: False]
+#   --rc                              Remove raw methylation calls. [default: False]
+#   --underConvSeq <underConvSeq>     Name of Lambda Sequence used to control unmethylated cytosines which fails to be deaminated and thus appears to be Methylated.[default: None]
+#   --overConvSeq <overConvSeq>       Name of Lambda Sequence used to control methylated cytosines which are deaminated and thus appears to be Unmethylated.[default: None]
+#   --keepUnmatched                   Do not discard reads that do not form proper pairs. [default: False]
+#   --keepDuplicates                  Do not merge duplicate reads. [default: False]
+#   --quality <quality>               Quality filtering criteria to apply to CpGs when creating Genome Browser tracks. [default: 20]
+#   --informative_reads <informative_reads> Informative reads to support CpGs when creating Genome Browser tracks. [default: 5]
+#   --timeMap <timeMap>               Time to perform the mapping job [default: 04:30:00].
+#   --timeMapMerge <timeMapMerge>     Time to perform the merging of the mapping jobs [default: 23:59:59].
+#   --timeCallChr <timeCallChr>       Time to perform the calling per contig or chromosome job [default: 23:59:59].
+#   --timeMergeCall <timeMergeCall>   Time to perform the merging of each chromosome call job [default: 23:59:59].
+#   --timeFilterCall <timeFilterCall> Time to perform the filtering of the calls job [default: 23:59:59].
+#   --jsonTime <jsonTime>             JSON file to configure Pipeline Steps
+#   --from <from_step_id>             Run the pipeline from step_id which could be: [default: LANE_MAP]
+#                                     LANE_MAP Bisulfite Lane Mapping  
+#                                     MERGE_MAP Merge Lane Mappings per each Sample 
+#                                     REPORT_MAP Bisulfite Lane Mapping Report
+#                                     SNP_CHR Performs variant calls per chromosome for a given sample
+#                                     SNP_SAMPLE Merge chromosome calls per Sample
+#                                     SNP_REPORT Variants Report
+#                                     CPG_FILTER Filter Calls
+
+#%begin pipeline
+import os
+import os.path
+import json
+import sys
+
+
+#########################  0.COMMON VARIABLES  ######################################
+
+#0.1 Configuration file
+self.config = {}
+with open(args['jsonConfig']) as json_file:
+    self.config = json.load(json_file)
+
+#0.2 Global function definition
+def uniqueList(seq):
+    """
+    Remove duplicates entries in a list
+    """
+    seen = set()
+    seen_add = seen.add
+    return [ x for x in seq if not (x in seen or seen_add(x))]
+
+
+
+
+chromList = []
+fileListChroms = False
+
+if not args['chromList']:
+    chromList = ["chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9","chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22","chrX","chrY"]
+
+elif len(args['chromList']) > 1:
+    chromList = args['chromList']
+elif os.path.isfile(args['chromList'][0]):
+    fileListChroms = True
+    #Check if List_chroms is a file or just a list of chromosomes
+    #Parse file to extract chromosme list 
+    with open(args['chromList'][0], 'r') as chromFile:
+        for line in chromFile:
+            chromList.append(line.rstrip())
+else:
+    chromList = args['chromList']
+
+
+#UCSC Genome Browser Configuration Tracks for filtering
+if not args['quality']:
+    self.quality_filtering = "20"
+else:
+    self.quality_filtering = args['quality']
+
+if not args['informative_reads']:
+    self.informative_reads = "20"
+else:
+    self.informative_reads = args['informative_reads']
+
+
+
+if not args['timeMap']:
+    self.timeMap = "04:30:00"
+else:
+    self.timeMap = args['timeMap']
+
+if not args['timeMapMerge']:
+    self.timeMapMerge = "23:59:59"
+else:
+    self.timeMapMerge = args['timeMapMerge']
+
+if not args['timeCallChr']:
+    self.timeCallChr = "23:59:59"
+else:
+    self.timeCallChr = args['timeCallChr']
+
+if not args['timeMergeCall']:
+    self.timeMergeCall = "23:59:59"
+else:
+    self.timeMergeCall = args['timeMergeCall']
+
+if not args['timeFilterCall']:
+    self.timeFilterCall = "23:59:59"
+else:
+    self.timeFilterCall = args['timeFilterCall']
+
+if not args['dbSNP']:
+    self.db_snp = ""
+else:
+    self.db_snp = args['dbSNP']
+
+
+#Configure time from json file
+if args['jsonTime']:
+    with open(args['jsonTime'], 'r') as timesJson:
+        data = json.load(timesJson)      
+        for concept,time in data.iteritems():
+            if concept == "max_mapping_time":
+                self.timeMap = time
+            elif concept == "max_merging_time":
+                self.timeMapMerge = time 
+            elif concept == "max_call_snps_time":
+                self.timeCallChr = time
+            elif concept == "max_concatenation_calls_time":
+                self.timeMergeCall = time
+            elif concept == "max_filter_calls_time":
+                self.timeFilterCall = time
+
+
+######################  1.BASIC CLASS DEFINITION  ####################################
+class DoJobs(object):
+    """Class to manage wihch jobs should be executed"""
+    def __init__(self):
+        """Member Initialization"""
+        self.doLaneMap = True
+        self.doMergeMap = True
+        self.doReportMap = True
+        self.doSnpChromCall = True
+        self.doSnpSampleCall = True
+        self.doSnpReport = True
+        self.doCpgFilter = True
+
+    def setup(self,laneMap=True,mergeMap=True,reportMap=True,snpChromCall=True,snpSampleCall=True,snpReport=True,cpgFilter=True):
+        """Configure Job"""
+        self.doLaneMap = laneMap
+        self.doMergeMap = mergeMap
+        self.doReportMap = reportMap
+        self.doSnpChromCall = snpChromCall
+        self.doSnpSampleCall = snpSampleCall
+        self.doSnpReport = snpReport
+        self.doCpgFilter = cpgFilter
+      
+
+class Pipeline(object):
+    """Class Pipeline"""
+
+    def __init__(self):
+        self.laneMappingJobs = {}
+        self.mappingReportJob = None
+        self.mergingJobs = {}
+        self.callSampleChromJob = {}
+        self.callSampleJob = {}
+        self.variantsReportJob = None
+        self.filterSampleJob = {}
+    
+    class JobBasic():
+        """Basic Job Definition"""
+        def __init__(self,isTmp=False,time="23:59:59",threads="1",log="",out="",jobName="",fli="",bs_merging_dir="",input="",output="",dirOutput="",output_dir=""):
+            """Configure Job"""
+            self.isTmp = isTmp
+            self.time = time
+            self.threads = threads
+            self.log = log
+            self.out = out
+            self.jobName = jobName
+            self.input = input
+            self.output = output
+            self.dir_output = dirOutput
+            self.fli = fli
+            self.lane_mappings_dir = output_dir
+
+    def buildOutputDirectory(self,directoryOuput=""):
+        import os
+        if not os.path.exists(directoryOuput):
+            os.makedirs(directoryOuput)
+
+    def laneMappingJobsDef(self,config=None,isTmp=False,time="23:59:59",threads="1",dirOutput=""):
+        """Lane Mapping Jobs"""
+        #1. OUTPUT DIRECTORY
+        output_dir = "%s/bs_mapping/" %(dirOutput)
+        output_dir_out_err = "%s/out_mn/" %(output_dir)
+
+        self.buildOutputDirectory(directoryOuput=output_dir_out_err)
+
+        for fli in config:
+            sample = config[fli]["sample_barcode"]
+            library = config[fli]["library_barcode"]
+            flowcell = config[fli]["flowcell_name"]
+            lane = config[fli]["lane_number"]
+            index = config[fli]["index_name"]
+
+            output_mapping = "%s/%s.bam" %(output_dir,fli)
+            output_json = "%s/%s.json" %(output_dir,fli)  
+        
+            laneJob = self.JobBasic(isTmp=isTmp,time=time,threads=threads,log="%s/bs_map_%s.err" %(output_dir_out_err,fli),out="%s/bs_map_%s.out" %(output_dir_out_err,fli),\
+                               jobName="bs_mapping_%s" %(fli),input="",output=[output_mapping,output_json],fli=fli,dirOutput=output_dir)
+
+            if sample not in self.laneMappingJobs:
+                fliJob = {}
+                fliJob[fli] = laneJob 
+                self.laneMappingJobs[sample] = fliJob
+            else:
+                if fli not in self.laneMappingJobs[sample]:
+                    fliJob = {}
+                    fliJob[fli] = laneJob
+                    self.laneMappingJobs[sample].update(fliJob) 
+                else: 
+                    self.laneMappingJobs[sample][fli] = laneJob
+            
+    def mappingReportJobDef(self,name=None,isTmp=False,time="23:59:59",threads="1",dirOutput=""):
+        """Mapping Report Job"""
+        #1. OUTPUT DIRECTORY
+        output_dir = "%s/report/mappings/" %(dirOutput)
+        output_dir_out_err = "%s/out_mn/" %(output_dir)
+
+        self.buildOutputDirectory(directoryOuput=output_dir_out_err)
+
+        #2. COLLECTION OF INPUTS
+        fli_json_files = []
+        for sample in self.laneMappingJobs:
+            for fli in self.laneMappingJobs[sample]:
+                fli_json_files.append(self.laneMappingJobs[sample][fli].output[1])
+
+        self.mappingReportJob = self.JobBasic(isTmp=isTmp,time=time,threads=threads,log="%s/report_%s.err" %(output_dir_out_err,name),out="%s/report_%s.out" %(output_dir_out_err,name),\
+                                         jobName="bs_map_report_%s" %(name),input=fli_json_files,output="",dirOutput=output_dir)
+
+    def mergingReportJobDef(self,sample=None,isTmp=False,time="23:59:59",threads="1",dirOutput=""):
+        """Mapping Merging Job"""
+        #1. OUTPUT DIRECTORY
+        output_dir = "%s/bs_mapping_merged/" %(dirOutput)
+        output_dir_out_err = "%s/out_mn/" %(output_dir)
+
+        self.buildOutputDirectory(directoryOuput=output_dir_out_err)
+
+        #2. LIST OF BAM FILES 
+        fli_bam_files = []
+        for fli in self.laneMappingJobs[sample]:
+            fli_bam_files.append(self.laneMappingJobs[sample][fli].output[0])
+
+        mergedOutput = "%s/%s.bam" %(output_dir,sample)
+        md5Output = "%s/%s.bam.md5" %(output_dir,sample)
+
+        mergingJob = self.JobBasic(isTmp=isTmp,time=time,threads=threads,log="%s/map_merging_%s.err" %(output_dir_out_err,sample),out="%s/map_merging_%s.out" %(output_dir_out_err,sample),\
+                                         jobName="map_merging_%s" %(sample),input=fli_bam_files,output=[mergedOutput,md5Output],output_dir="%s/bs_mapping/" %(dirOutput),dirOutput=output_dir)
+
+        self.mergingJobs[sample] = mergingJob 
+
+    def snpCallSampleChromJobDef(self,sample=None,chromList=None,isTmp=False,time="23:59:59",threads="1",dirOutput=""):
+        """SNP Call sample chromosome Job""" 
+        #1. OUTPUT DIRECTORY
+        output_dir = "%s/meth_calls_sample_chr/" %(dirOutput)
+        output_dir_out_err = "%s/out_mn/" %(output_dir)
+
+        self.buildOutputDirectory(directoryOuput=output_dir_out_err)
+        
+        for chrom in chromList:
+            output = "%s/%s_%s.bcf" %(output_dir,sample,chrom)
+            outputStats = "%s/%s_%s.json" %(output_dir,sample,chrom)
+            chromJob = self.JobBasic(isTmp=isTmp,time=time,threads=threads,log="%s/meth_call_%s_%s.err" %(output_dir_out_err,sample,chrom),out="%s/meth_call_%s_%s.out" %(output_dir_out_err,sample,chrom),\
+                                jobName='met_call_%s_%s' %(sample,chrom),input=self.mergingJobs[sample].output[0],output=[output,outputStats],dirOutput=output_dir)
+
+            if sample not in self.callSampleChromJob:
+                chromCallJob = {}
+                chromCallJob[chrom] = chromJob
+                self.callSampleChromJob[sample] = chromCallJob
+            else: 
+                if chrom not in self.callSampleChromJob[sample]:
+                    chromCallJob = {}
+                    chromCallJob[chrom] = chromJob
+                    self.callSampleChromJob[sample].update(chromCallJob)
+                else: 
+                    self.callSampleChromJob[sample][chrom] = chromJob
+        
+        
+
+    def mergeSnpSampleJobDef(self,sample=None,isTmp=False,time="23:59:59",threads="1",dirOutput=""):
+        """Merge SNP Calls per Sample Job"""
+        #1. OUTPUT DIRECTORY
+        output_dir = "%s/meth_calls_sample/" %(dirOutput)
+        output_dir_out_err = "%s/out_mn/" %(output_dir)
+
+        self.buildOutputDirectory(directoryOuput=output_dir_out_err)
+
+        #2 Output definition
+        output = "%s/%s.raw.bcf" %(output_dir,sample)
+
+        #3 Input list files
+        listInputFiles = []
+        for chrom in self.callSampleChromJob[sample]:
+            listInputFiles.append(self.callSampleChromJob[sample][chrom].output[0])
+
+        #4 Create Input List
+        mergeCallSampleJob = self.JobBasic(isTmp=isTmp,time=time,threads=threads,log="%s/calls_concat_%s.err" %(output_dir_out_err,sample),
+                              out="%s/calls_concat_%s.out" %(output_dir_out_err,sample),\
+                              jobName='calls_concat_%s' %(sample),input=listInputFiles,output=output,dirOutput=output_dir)
+
+        #5 Merge calls
+        self.callSampleJob[sample] = mergeCallSampleJob
+
+
+    def variantsReportJobDef(self,name=None,isTmp=False,time="03:59:59",threads="1",dirOutput=""):
+        """Variants Report Job"""
+        #1. OUTPUT DIRECTORY
+        output_dir = "%s/report/variants/" %(dirOutput)
+        output_dir_out_err = "%s/out_mn/" %(output_dir)
+
+        self.buildOutputDirectory(directoryOuput=output_dir_out_err)
+
+        #2. Input list files
+        listInputFiles = []
+
+        for sample in self.callSampleChromJob:
+            for chrom in self.callSampleChromJob[sample]:
+                listInputFiles.append(self.callSampleChromJob[sample][chrom].output[1])
+
+
+        self.variantsReportJob = self.JobBasic(isTmp=isTmp,time=time,threads=threads,log="%s/variants_report_%s.err" %(output_dir_out_err,name),out="%s/variants_report_%s.out" %(output_dir_out_err,name),\
+                                         jobName="variants_report_%s" %(name),input=listInputFiles,output="",dirOutput=output_dir)
+
+    def filterSnpSampleJobDef(self,sample=None,isTmp=False,time="03:59:59",threads="1",dirOutput=""):
+        """Filter SNP Sample Job"""
+        #1. OUTPUT DIRECTORY
+        output_dir = "%s/meth_filtering/" %(dirOutput)
+        output_dir_out_err = "%s/out_mn/" %(output_dir)
+        output = "%s/%s_cpg.txt.gz" %(output_dir,sample)
+        output_stats = "%s/%s_cpg.json" %(output_dir,sample)
+        output_meth = "%s/%s_cpg_meth.json" %(output_dir,sample)
+        output_call = "%s/%s.bs_call.bw" %(output_dir,sample)
+        output_cov = "%s/%s.bs_cov.bw" %(output_dir,sample)
+
+        self.buildOutputDirectory(directoryOuput=output_dir_out_err)
+
+        #4. Filtering BCF Filtering file
+        filteringJob = self.JobBasic(isTmp=isTmp,time=time,threads=threads,log="%s/filter_calls_%s.err" %(output_dir_out_err,sample),
+                              out="%s/filter_calls_%s.out" %(output_dir_out_err,sample),\
+                              jobName='filter_bcf_%s' %(sample),input=self.callSampleJob[sample].output,output=[output,output_stats,output_meth,output_call,output_cov],dirOutput=output_dir)
+ 
+        #3 Filter Calls
+        self.filterSampleJob[sample] = filteringJob
+
+####################  2.BISULFITE PIPELINE CONFIGURATION #############################
+
+#2.0 STEPS TO PERFORM
+steps = DoJobs()
+
+if args['from'] == "LANE_MAP":
+    steps.setup(laneMap=True,mergeMap=True,reportMap=True,snpChromCall=True,snpSampleCall=True,snpReport=True,cpgFilter=True)
+elif args['from'] == "MERGE_MAP":
+    steps.setup(laneMap=False,mergeMap=True,reportMap=True,snpChromCall=True,snpSampleCall=True,snpReport=True,cpgFilter=True)
+elif args['from'] == "REPORT_MAP":
+    steps.setup(laneMap=False,mergeMap=False,reportMap=True,snpChromCall=True,snpSampleCall=True,snpReport=True,cpgFilter=True)
+elif args['from'] == "SNP_CHR":
+    steps.setup(laneMap=False,mergeMap=False,reportMap=False,snpChromCall=True,snpSampleCall=True,snpReport=True,cpgFilter=True)
+elif args['from'] == "SNP_SAMPLE":
+    steps.setup(laneMap=False,mergeMap=False,reportMap=False,snpChromCall=False,snpSampleCall=True,snpReport=True,cpgFilter=True)
+elif args['from'] == "SNP_REPORT":
+    steps.setup(laneMap=False,mergeMap=False,reportMap=False,snpChromCall=False,snpSampleCall=False,snpReport=True,cpgFilter=True)
+elif args['from'] == "CPG_FILTER":
+    steps.setup(laneMap=False,mergeMap=False,reportMap=False,snpChromCall=False,snpSampleCall=False,snpReport=False,cpgFilter=True)
+else:
+    steps.setup()
+
+#2.1. Pipeline object creation
+bisulfite = Pipeline()
+
+#########################  3.BISULFITE MAPPING ######################################
+
+#3.1 Mapping per lane
+
+bisulfite.laneMappingJobsDef(config=self.config,isTmp=args['rm'],time=self.timeMap,threads=args["threads"],dirOutput=args['dirOut'])
+
+#3.1.2 Processing each lane
+mapping_jobs = {}
+
+for sample in bisulfite.laneMappingJobs:
+    for fli in bisulfite.laneMappingJobs[sample]:
+        if steps.doLaneMap:
+            fliJob = bisulfite.laneMappingJobs[sample][fli]
+            basic_mapping = job(fliJob.jobName,time=fliJob.time,threads=fliJob.threads,temp=fliJob.isTmp,log=fliJob.log, out=fliJob.out ).\
+                            run('bsMapping',index=args["index"],fli=fli,config=args['jsonConfig'],input=args["seqDir"],\
+                                  output_dir=fliJob.dir_output,tmp=args["tmpDir"],threads=fliJob.threads,pe=args["pe"],\
+                                  underConvSeq=args['underConvSeq'],overConvSeq=args['overConvSeq'])
+
+            if sample not in mapping_jobs:
+                mapping_jobs[sample] = [basic_mapping]
+            else:
+                mapping_jobs[sample].append(basic_mapping)  
+
+
+#3.2 Bisulfite Mapping Report
+
+bisulfite.mappingReportJobDef(name=args['name'],isTmp=False,time="00:09:59",threads="1",dirOutput=args['dirOut'])
+
+#3.2.2 Collection of outputs to wait for
+lane_json_files = []
+
+for sample in mapping_jobs:
+    for bsJob in mapping_jobs[sample]:
+        lane_json_files.append(bsJob.output_json)
+        
+
+reportJobCfg = bisulfite.mappingReportJob
+
+#3.2.3 If the job should be run
+if steps.doReportMap:
+    reportJob = job(reportJobCfg.jobName,time=reportJobCfg.time,threads=reportJobCfg.threads,log=reportJobCfg.log,out=reportJobCfg.out)
+    mapping_directory = bisulfite.laneMappingJobs.values()[0].values()[0].dir_output
+
+    #3.2.3.1 If the previous job has to be run
+    if steps.doLaneMap:
+        reportJob.run('bsMappingReport',input=lane_json_files,mapping_dir=mapping_directory,json=args['jsonConfig'],project_name=args['name'],output_dir=reportJobCfg.dir_output)
+    else:
+        #3.2.3.2 If the previous job is not going to be run
+        reportJob.run('bsMappingReport',input=reportJobCfg.input,mapping_dir=mapping_directory,json=args['jsonConfig'],project_name=args['name'],output_dir=reportJobCfg.dir_output)
+
+#3.3 Merging all lanes
+
+#3.3.1 Output directory definition
+sample_list_job = {}
+#3.3.2 Merge files per sample
+for sample in bisulfite.laneMappingJobs:
+    bisulfite.mergingReportJobDef(sample=sample,isTmp=args['rm'],time=self.timeMapMerge,threads=args["threads"],dirOutput=args['dirOut'])
+
+    mergerJobCfg = bisulfite.mergingJobs[sample]
+
+    if steps.doMergeMap:
+       if steps.doLaneMap:
+            #3.3.2.1 Collection of outputs to wait for
+            lane_bams = []
+            for bsJob in mapping_jobs[sample]:
+                lane_bams.append(bsJob.output)
+               
+            mergerJob = job(mergerJobCfg.jobName,time=mergerJobCfg.time,threads=mergerJobCfg.threads,temp=mergerJobCfg.isTmp,log=mergerJobCfg.log,out=mergerJobCfg.out).\
+                        run('mapMerge',input=lane_bams,input_dir=mergerJobCfg.lane_mappings_dir,output_dir=mergerJobCfg.dir_output,config=args['jsonConfig'],\
+                             tmp=args["tmpDir"],barcode=sample,threads=args["threads"],output=mergerJobCfg.output[0],md5=mergerJobCfg.output[1])
+
+            sample_list_job[sample] = mergerJob         
+       else:
+            mergerJob = job(mergerJobCfg.jobName,time=mergerJobCfg.time,threads=mergerJobCfg.threads,temp=mergerJobCfg.isTmp,log=mergerJobCfg.log,out=mergerJobCfg.out).\
+                        run('mapMerge',input=mergerJobCfg.input,input_dir=mergerJobCfg.lane_mappings_dir,output_dir=mergerJobCfg.dir_output,config=args['jsonConfig'],\
+                             tmp=args["tmpDir"],barcode=sample,threads=args["threads"],output=mergerJobCfg.output[0],md5=mergerJobCfg.output[1])
+
+            sample_list_job[sample] = mergerJob
+
+#########################  4.METHYLATION CALLING ####################################
+
+#4.0 Methylation Jobs
+snp_calls_jobs = {}
+merge_snp_jobs = {}
+cpg_meth_jobs = {}
+
+
+#4.1 Methylation calls per chromosome and sample
+
+#for sample,sampleMergingJob in sample_list_job.iteritems():
+for sample in bisulfite.laneMappingJobs:
+    #4.1.1 Create bisulfite job configurations
+    bisulfite.snpCallSampleChromJobDef(sample=sample,chromList=chromList,isTmp=args['rc'],time=self.timeCallChr,threads="8",dirOutput=args['dirOut'])
+    
+    #4.1.2 Should we perform the chromosome snp calls jobs?
+    if steps.doSnpChromCall:
+        #4.1.2.1 Jobs per chromosome
+        meth_calls_jobs = []
+
+        for chromosome in chromList:
+            chromJobCfg = bisulfite.callSampleChromJob[sample][chromosome]
+            
+            #4.1.2.1.1 Should the previous job be performed?
+            if steps.doMergeMap:
+                sampleMergingJob = sample_list_job[sample]                              
+                callJob = job(chromJobCfg.jobName, time=chromJobCfg.time,threads=chromJobCfg.threads,temp=chromJobCfg.isTmp,log=chromJobCfg.log,out=chromJobCfg.out).\
+                          run('meth_call_sample_chrom',fasta=args['ref'],species=args['typeSpecies'],threads=chromJobCfg.threads,dbsnp=self.db_snp,sample=sample,chrom=chromosome,\
+                              input=sampleMergingJob.output,output_dir=chromJobCfg.dir_output,output_call=chromJobCfg.output[0],output_stats=chromJobCfg.output[1],\
+                              pe=args["pe"],keepUnmatched=args["keepUnmatched"],keepDuplicates=args["keepDuplicates"])    
+                meth_calls_jobs.append(callJob)
+            else:
+                callJob = job(chromJobCfg.jobName, time=chromJobCfg.time,threads=chromJobCfg.threads,temp=chromJobCfg.isTmp,log=chromJobCfg.log,out=chromJobCfg.out).\
+                          run('meth_call_sample_chrom',fasta=args['ref'],species=args['typeSpecies'],threads=chromJobCfg.threads,dbsnp=self.db_snp,sample=sample,chrom=chromosome,\
+                            input=chromJobCfg.input,output_dir=chromJobCfg.dir_output,output_call=chromJobCfg.output[0],output_stats=chromJobCfg.output[1],\
+                            pe=args["pe"],keepUnmatched=args["keepUnmatched"],keepDuplicates=args["keepDuplicates"])
+                meth_calls_jobs.append(callJob)
+
+        snp_calls_jobs[sample] = meth_calls_jobs
+
+    #4.1.3 Should we perform the merging per sample calls job?  
+    bisulfite.mergeSnpSampleJobDef(sample=sample,isTmp=False,time=self.timeMergeCall,threads="1",dirOutput=args['dirOut'])
+    if steps.doSnpSampleCall:
+        mergeJobCfg = bisulfite.callSampleJob[sample]
+        #4.1.3.1 Should the previous job be performed?
+        if steps.doSnpChromCall:
+            bcfList = []
+            for job_meth in meth_calls_jobs:
+                bcfList.append(job_meth.output_call)
+
+            mergeBcfJob = job(mergeJobCfg.jobName,time=mergeJobCfg.time,threads=1,temp=False,log=mergeJobCfg.log,out=mergeJobCfg.out).\
+                          run('merge_calls',sample=sample,chromBcfs=bcfList,output_dir=mergeJobCfg.dir_output,output=mergeJobCfg.output)
+            merge_snp_jobs[sample] = mergeBcfJob
+        else:
+            mergeBcfJob = job(mergeJobCfg.jobName,time=mergeJobCfg.time,threads=1,temp=False,log=mergeJobCfg.log,out=mergeJobCfg.out).\
+                           run('merge_calls',sample=sample,chromBcfs=mergeJobCfg.input,output_dir=mergeJobCfg.dir_output,output=mergeJobCfg.output)
+            merge_snp_jobs[sample] = mergeBcfJob
+
+
+    #4.1.4 Filtering CpG Files
+    if args['fi']:
+        bisulfite.filterSnpSampleJobDef(sample=sample,isTmp=False,time=self.timeFilterCall,threads="1",dirOutput=args['dirOut'])
+        #4.1.3.1 If CPG Filtering should be done
+        if steps.doCpgFilter:
+            cpgJobCfg = bisulfite.filterSampleJob[sample]
+            #4.1.3.2 Should the previous job be performed?
+            if steps.doSnpSampleCall: 
+                cpgJob = job(cpgJobCfg.jobName,time=cpgJobCfg.time,threads=1,log=cpgJobCfg.log,out=cpgJobCfg.out).\
+                         run('filter_calls',meth_bcf=merge_snp_jobs[sample].output,filter_path=cpgJobCfg.dir_output,chromosome_length=args['chrom_len'],sample=sample,\
+                              output=cpgJobCfg.output[0],output_stats=cpgJobCfg.output[1],output_meth=cpgJobCfg.output[2],output_call_bw=cpgJobCfg.output[3],output_cov_bw=cpgJobCfg.output[4],\
+                              quality=self.quality_filtering,informative_reads=self.informative_reads)
+                cpg_meth_jobs[sample] = cpgJob
+            else:
+                cpgJob = job(cpgJobCfg.jobName,time=cpgJobCfg.time,threads=1,log=cpgJobCfg.log,out=cpgJobCfg.out).\
+                         run('filter_calls',meth_bcf=cpgJobCfg.input,filter_path=cpgJobCfg.dir_output,chromosome_length=args['chrom_len'],sample=sample,\ 
+                              output=cpgJobCfg.output[0],output_stats=cpgJobCfg.output[1],output_meth=cpgJobCfg.output[2],output_call_bw=cpgJobCfg.output[3],output_cov_bw=cpgJobCfg.output[4],\
+                              quality=self.quality_filtering,informative_reads=self.informative_reads)
+                cpg_meth_jobs[sample] = cpgJob
+
+
+#########################  5.VARIANT REPORTS ####################################
+
+#5.1 Variants Report
+bisulfite.variantsReportJobDef(name=args['name'],isTmp=False,time="00:19:59",threads="1",dirOutput=args['dirOut'])
+
+#5.2 Collection of outputs to wait for
+sample_chr_json_files = []
+
+for sample in snp_calls_jobs:
+    for snpCallJob in snp_calls_jobs[sample]:
+        sample_chr_json_files.append(snpCallJob.output_stats)
+        
+variantReportJobCfg = bisulfite.variantsReportJob
+
+#5.3 If the job should be run
+if steps.doSnpReport:
+    variantsReportJob = job(variantReportJobCfg.jobName,time=variantReportJobCfg.time,threads=variantReportJobCfg.threads,log=variantReportJobCfg.log,out=variantReportJobCfg.out)
+    snp_calls_directory = bisulfite.callSampleChromJob.values()[0].values()[0].dir_output
+
+    #Chromosome List Building
+    listChroms = None
+    if fileListChroms:
+        listChroms = args['chromList'][0]
+    else:
+        listChroms = chromList
+
+    #5.3.1 If the previous job has to be run
+    if steps.doSnpChromCall:
+        variantsReportJob.run('variantsReport',input=sample_chr_json_files,snpcalls_dir=snp_calls_directory,json=args['jsonConfig'],project_name=args['name'],output_dir=variantReportJobCfg.dir_output,chromList=listChroms)
+    else:
+        #5.3.2 If the previous job is not going to be run
+        variantsReportJob.run('variantsReport',input=variantReportJobCfg.input,snpcalls_dir=snp_calls_directory,json=args['jsonConfig'],project_name=args['name'],output_dir=variantReportJobCfg.dir_output,chromList=listChroms)
+
+

@@ -1,0 +1,24 @@
+#!/usr/bin/env jip
+#
+# Merges bisulfite mapping files
+#
+# Usage:
+#  mapMerge.jip -i <input>... -n <input_dir> -d <output_dir> -c <config> -b <barcode> -m <tmp> -t <threads> -o <output> -f <md5> 
+#
+# Inputs:
+#  -i, --input <input>...        List of input bams to be merged
+#  -n, --input_dir <input_dir>   Directory input were are located the bam files
+#  -d, --output_dir <output_dir> Directory to store merged bam files
+#  -c, --config <config>         JSON configuration file
+#
+# Options:
+#  -t, --threads <threads>       Number of threads to perform the Job
+#  -b, --barcode <barcode>       Barcode sample name
+#  -m, --tmp <tmp>               TMP directory
+#
+# Outputs:
+#  -o, --output <output>         Output to be generated
+#  -f, --md5 <md5>               MD5 output file  
+#
+
+gemBS merging-sample -i ${input_dir} -o ${output_dir} -j ${config} -s ${barcode} -t ${threads} -d ${tmp} 

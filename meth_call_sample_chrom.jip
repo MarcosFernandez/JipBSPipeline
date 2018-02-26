@@ -1,0 +1,48 @@
+#!/usr/bin/env jip
+#
+# Methylation call per sample and chromosome
+#
+# Usage:
+#  meth_call_sample_chrom.jip -f <fasta> [-s <species>] -n <threads> -b <dbsnp> -a <sample> -c <chrom> -i <input> -d <output_dir> -o <output_call> -t <output_stats> --pe --keepUnmatched --keepDuplicates
+#
+# Inputs:
+#    -f, --fasta <fasta>                Fasta reference file
+#    -i, --input <input>                Bam file from which the methylation call has to be performed
+#    -d, --output_dir <output_dir>      Output to store the methylation results.
+#
+# Options:
+#    -n, --threads <threads>            Number of threads
+#    -b, --dbsnp <dbsnp>                dbSNP index file. 
+#    -s, --species <species>            Type of species. [default: HomoSapiens]
+#    -a, --sample <sample>              Sample name, usually Barcode
+#    -c, --chrom <chrom>                Chromosome name to perform the methylation call
+#    --pe                               Is or not paired end sequencing [default: false]
+#    --keepUnmatched                    Do not discard reads that do not form proper pairs. [default: false]
+#    --keepDuplicates                   Do not merge duplicate reads. [default: false]
+#
+# Outputs:
+#    -o, --output_call <output_call>    Output file to be generated
+#    -t, --output_stats <output_stats>  Output Stats to be generated
+
+paired=`echo ${pe|arg("yes")|else("no")}`
+
+dbSNP=`echo ${dbsnp}`
+
+keep_unmatched=`echo ${keepUnmatched|arg("-k")|else("")}`
+keep_duplicates=`echo ${keepDuplicates|arg("-u")|else("")}`
+
+dbsnp_index=""
+
+if [ "$dbSNP" != "" ];
+then
+    dbsnp_index="-d "${dbsnp}
+fi
+
+
+if [ "$paired" == "yes" ];
+then
+    gemBS  bscall -r ${fasta} -t ${threads} -e ${species} ${dbsnp_index} -s ${sample} -c ${chrom} -i ${input} -o ${output_dir} -p ${keep_unmatched} ${keep_duplicates}
+else
+    gemBS  bscall -r ${fasta} -t ${threads} -e ${species} ${dbsnp_index} -s ${sample} -c ${chrom} -i ${input} -o ${output_dir} ${keep_duplicates}
+fi
+          
